@@ -46,4 +46,12 @@ urllib3==2.6.3
 watchdog==6.0.0
 yt-dlp==2026.2.4
 pytubefix
+streamlit
+opencv-python-headless
+pillow
+fpdf
+yt-dlp
+scikit-image
+scipy
+requests
 
