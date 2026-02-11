@@ -13,7 +13,7 @@ from skimage.metrics import structural_similarity as ssim
 import streamlit as st
 
 def download_video(url, max_retries=3):
-    """Download video with proper cleanup and unique filenames to avoid resume errors"""
+    """Download video with cloud-friendly configuration"""
     # Generate unique filename to avoid conflicts
     unique_id = str(uuid.uuid4())[:8]
     filename = f"video_{unique_id}.mp4"
@@ -32,8 +32,22 @@ def download_video(url, max_retries=3):
         'ignoreerrors': False,
         'noprogress': True,
         'no_color': True,
-        'overwrites': True,  # Overwrite existing files
-        'continuedl': False,  # Don't continue partial downloads
+        'overwrites': True,
+        'continuedl': False,
+        # Add these for cloud deployment
+        'nocheckcertificate': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'web'],
+                'player_skip': ['webpage', 'configs'],
+            }
+        },
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-us,en;q=0.5',
+            'Sec-Fetch-Mode': 'navigate',
+        }
     }
     
     for attempt in range(max_retries):
@@ -53,7 +67,9 @@ def download_video(url, max_retries=3):
                 st.warning(f"Download completed but file not found. Attempt {attempt + 1}/{max_retries}")
                 
         except Exception as e:
-            st.warning(f"Download attempt {attempt + 1}/{max_retries} failed: {str(e)[:100]}")
+            error_msg = str(e)
+            st.warning(f"Download attempt {attempt + 1}/{max_retries} failed: {error_msg[:150]}")
+            
             # Clean up failed downloads
             if os.path.exists(filename):
                 os.remove(filename)
@@ -63,7 +79,7 @@ def download_video(url, max_retries=3):
             if attempt < max_retries - 1:
                 continue
             else:
-                st.error(f"Failed to download video after {max_retries} attempts.")
+                st.error(f"Failed to download video after {max_retries} attempts. Error: {error_msg[:200]}")
                 return None
     
     return None
@@ -99,6 +115,11 @@ def get_playlist_videos(playlist_url):
         'playlistend': 1000,
         'extract_flat': True,
         'quiet': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'web'],
+            }
+        },
     }
     
     try:
@@ -233,6 +254,11 @@ def get_video_title(url):
     ydl_opts = {
         'skip_download': True,
         'quiet': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'web'],
+            }
+        },
     }
     
     try:
@@ -271,6 +297,7 @@ def process_single_video(url):
     video_file = download_video(url)
     if not video_file or not os.path.exists(video_file):
         st.error("Failed to download video. Please check the URL and try again.")
+        st.info("💡 Tip: Some videos may be restricted. Try a different video or check if the video is publicly available.")
         return None
     
     try:
@@ -301,7 +328,7 @@ def process_single_video(url):
         return output_pdf_name
     except Exception as e:
         st.error(f"Error processing video: {e}")
-        if os.path.exists(video_file):
+        if video_file and os.path.exists(video_file):
             try:
                 os.remove(video_file)
             except:
@@ -309,27 +336,31 @@ def process_single_video(url):
         return None
 
 def main():
-    st.title("YouTube Video to PDF Frame Extractor")
+    st.title("🎬 YouTube Video to PDF Frame Extractor")
     st.write("Extract unique frames from YouTube videos and create a PDF with timestamps")
     
     # Clean up old files on start
     cleanup_temp_files()
     
     # Input URL
-    url = st.text_input("Enter the YouTube video or playlist URL:")
+    url = st.text_input("Enter the YouTube video or playlist URL:", placeholder="https://www.youtube.com/watch?v=...")
     
     if not url:
-        st.info("Please enter a YouTube URL to begin")
+        st.info("👆 Please enter a YouTube URL to begin")
+        st.markdown("### How to use:")
+        st.markdown("1. Paste a YouTube video URL")
+        st.markdown("2. Click 'Process Video/Playlist'")
+        st.markdown("3. Download the generated PDF with timestamped frames")
         return
     
-    if st.button("Process Video/Playlist"):
+    if st.button("Process Video/Playlist", type="primary"):
         video_id = get_video_id(url)
         
         if video_id:  # Single video
             output_pdf = process_single_video(url)
             
             if output_pdf and os.path.exists(output_pdf):
-                st.success("PDF created successfully! ✅")
+                st.success("✅ PDF created successfully!")
                 with open(output_pdf, "rb") as f:
                     st.download_button(
                         label="📥 Download PDF",
@@ -372,7 +403,7 @@ def main():
                     except:
                         pass
             
-            st.success("All videos processed! ✅")
+            st.success("✅ All videos processed!")
 
 if __name__ == "__main__":
     main()
