@@ -8,60 +8,42 @@ import re
 import uuid
 from fpdf import FPDF
 from PIL import Image
-import yt_dlp
+from pytubefix import YouTube, Playlist
+from pytubefix.cli import on_progress
 from skimage.metrics import structural_similarity as ssim
 import streamlit as st
 
 def download_video(url, max_retries=3):
-    """Download video with cloud-friendly configuration"""
-    # Generate unique filename to avoid conflicts
+    """Download video using pytubefix"""
     unique_id = str(uuid.uuid4())[:8]
     filename = f"video_{unique_id}.mp4"
     
     # Delete any existing partial downloads
     if os.path.exists(filename):
         os.remove(filename)
-    if os.path.exists(f"{filename}.part"):
-        os.remove(f"{filename}.part")
-    
-    ydl_opts = {
-        'outtmpl': filename,
-        'format': 'best[ext=mp4]/best',
-        'quiet': True,
-        'no_warnings': False,
-        'ignoreerrors': False,
-        'noprogress': True,
-        'no_color': True,
-        'overwrites': True,
-        'continuedl': False,
-        # Add these for cloud deployment
-        'nocheckcertificate': True,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'web'],
-                'player_skip': ['webpage', 'configs'],
-            }
-        },
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-us,en;q=0.5',
-            'Sec-Fetch-Mode': 'navigate',
-        }
-    }
     
     for attempt in range(max_retries):
         try:
-            # Clean up before each attempt
-            if os.path.exists(filename):
-                os.remove(filename)
-            if os.path.exists(f"{filename}.part"):
-                os.remove(f"{filename}.part")
+            st.info(f"Downloading video (attempt {attempt + 1}/{max_retries})...")
             
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-                
+            yt = YouTube(url, on_progress_callback=on_progress)
+            
+            # Get the highest resolution progressive stream (has both video and audio)
+            stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
+            
+            if not stream:
+                # If no progressive stream, get highest resolution stream
+                stream = yt.streams.filter(file_extension='mp4').order_by('resolution').desc().first()
+            
+            if not stream:
+                st.error("No suitable video stream found")
+                return None
+            
+            # Download the video
+            stream.download(filename=filename)
+            
             if os.path.exists(filename):
+                st.success(f"Downloaded: {yt.title}")
                 return filename
             else:
                 st.warning(f"Download completed but file not found. Attempt {attempt + 1}/{max_retries}")
@@ -73,13 +55,11 @@ def download_video(url, max_retries=3):
             # Clean up failed downloads
             if os.path.exists(filename):
                 os.remove(filename)
-            if os.path.exists(f"{filename}.part"):
-                os.remove(f"{filename}.part")
             
             if attempt < max_retries - 1:
                 continue
             else:
-                st.error(f"Failed to download video after {max_retries} attempts. Error: {error_msg[:200]}")
+                st.error(f"Failed to download video after {max_retries} attempts.")
                 return None
     
     return None
@@ -110,27 +90,14 @@ def get_video_id(url):
 
 def get_playlist_videos(playlist_url):
     """Extract all video URLs from a playlist"""
-    ydl_opts = {
-        'ignoreerrors': True,
-        'playlistend': 1000,
-        'extract_flat': True,
-        'quiet': True,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'web'],
-            }
-        },
-    }
-    
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            playlist_info = ydl.extract_info(playlist_url, download=False)
-            if playlist_info and 'entries' in playlist_info:
-                return [f"https://www.youtube.com/watch?v={entry['id']}" 
-                        for entry in playlist_info['entries'] 
-                        if entry and 'id' in entry]
-            else:
-                return []
+        playlist = Playlist(playlist_url)
+        video_urls = []
+        
+        for video_url in playlist.video_urls:
+            video_urls.append(video_url)
+        
+        return video_urls
     except Exception as e:
         st.error(f"Error extracting playlist: {e}")
         return []
@@ -251,35 +218,24 @@ def convert_frames_to_pdf(input_folder, output_file, timestamps):
 
 def get_video_title(url):
     """Get video title from YouTube URL"""
-    ydl_opts = {
-        'skip_download': True,
-        'quiet': True,
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'web'],
-            }
-        },
-    }
-    
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            video_info = ydl.extract_info(url, download=False)
-            title = video_info.get('title', 'video')
-            # Sanitize filename
-            title = title.replace('/', '-').replace('\\', '-').replace(':', '-')
-            title = title.replace('*', '-').replace('?', '-').replace('<', '-')
-            title = title.replace('>', '-').replace('|', '-').replace('"', '-')
-            title = title.strip('.')
-            return title[:100]  # Limit length
+        yt = YouTube(url)
+        title = yt.title
+        # Sanitize filename
+        title = title.replace('/', '-').replace('\\', '-').replace(':', '-')
+        title = title.replace('*', '-').replace('?', '-').replace('<', '-')
+        title = title.replace('>', '-').replace('|', '-').replace('"', '-')
+        title = title.strip('.')
+        return title[:100]  # Limit length
     except Exception as e:
         st.warning(f"Could not get video title: {e}")
         return "video"
 
-def cleanup_temp_files(pattern="video_*.mp4"):
+def cleanup_temp_files():
     """Clean up any leftover temporary video files"""
     try:
         for file in os.listdir('.'):
-            if file.startswith('video_') and (file.endswith('.mp4') or file.endswith('.mp4.part')):
+            if file.startswith('video_') and file.endswith('.mp4'):
                 try:
                     os.remove(file)
                 except:
@@ -297,7 +253,7 @@ def process_single_video(url):
     video_file = download_video(url)
     if not video_file or not os.path.exists(video_file):
         st.error("Failed to download video. Please check the URL and try again.")
-        st.info("💡 Tip: Some videos may be restricted. Try a different video or check if the video is publicly available.")
+        st.info("💡 Tip: Make sure the video is publicly available and not age-restricted.")
         return None
     
     try:
