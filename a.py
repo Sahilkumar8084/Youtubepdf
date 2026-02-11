@@ -8,51 +8,77 @@ import re
 import uuid
 from fpdf import FPDF
 from PIL import Image
-from pytubefix import YouTube, Playlist
-from pytubefix.cli import on_progress
 from skimage.metrics import structural_similarity as ssim
 import streamlit as st
+import requests
+import json
 
-def download_video(url, max_retries=3):
-    """Download video using pytubefix"""
+def download_video_via_api(url, max_retries=3):
+    """Download video using cobalt.tools API (free, no auth needed)"""
     unique_id = str(uuid.uuid4())[:8]
     filename = f"video_{unique_id}.mp4"
     
-    # Delete any existing partial downloads
+    # Delete any existing file
     if os.path.exists(filename):
         os.remove(filename)
     
+    # Cobalt API endpoint
+    api_url = "https://api.cobalt.tools/api/json"
+    
     for attempt in range(max_retries):
         try:
-            st.info(f"Downloading video (attempt {attempt + 1}/{max_retries})...")
+            st.info(f"Downloading video via API (attempt {attempt + 1}/{max_retries})...")
             
-            yt = YouTube(url, on_progress_callback=on_progress)
+            # Request download link from Cobalt
+            headers = {
+                "Accept": "application/json",
+                "Content-Type": "application/json"
+            }
             
-            # Get the highest resolution progressive stream (has both video and audio)
-            stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
+            payload = {
+                "url": url,
+                "vCodec": "h264",
+                "vQuality": "720",
+                "aFormat": "mp3",
+                "isAudioOnly": False,
+                "filenamePattern": "basic"
+            }
             
-            if not stream:
-                # If no progressive stream, get highest resolution stream
-                stream = yt.streams.filter(file_extension='mp4').order_by('resolution').desc().first()
+            response = requests.post(api_url, json=payload, headers=headers, timeout=30)
             
-            if not stream:
-                st.error("No suitable video stream found")
-                return None
-            
-            # Download the video
-            stream.download(filename=filename)
-            
-            if os.path.exists(filename):
-                st.success(f"Downloaded: {yt.title}")
-                return filename
-            else:
-                st.warning(f"Download completed but file not found. Attempt {attempt + 1}/{max_retries}")
+            if response.status_code == 200:
+                data = response.json()
                 
-        except Exception as e:
-            error_msg = str(e)
-            st.warning(f"Download attempt {attempt + 1}/{max_retries} failed: {error_msg[:150]}")
+                if data.get("status") == "redirect" or data.get("status") == "stream":
+                    download_url = data.get("url")
+                    
+                    if download_url:
+                        # Download the video file
+                        st.info("Downloading video file...")
+                        video_response = requests.get(download_url, stream=True, timeout=120)
+                        
+                        if video_response.status_code == 200:
+                            with open(filename, 'wb') as f:
+                                for chunk in video_response.iter_content(chunk_size=8192):
+                                    f.write(chunk)
+                            
+                            if os.path.exists(filename) and os.path.getsize(filename) > 0:
+                                st.success("Video downloaded successfully!")
+                                return filename
+                        else:
+                            st.warning(f"Failed to download video file. Status: {video_response.status_code}")
+                    else:
+                        st.warning("No download URL in API response")
+                elif data.get("status") == "error":
+                    st.warning(f"API Error: {data.get('text', 'Unknown error')}")
+                else:
+                    st.warning(f"Unexpected API status: {data.get('status')}")
+            else:
+                st.warning(f"API request failed with status {response.status_code}")
             
-            # Clean up failed downloads
+        except Exception as e:
+            st.warning(f"Download attempt {attempt + 1}/{max_retries} failed: {str(e)[:200]}")
+            
             if os.path.exists(filename):
                 os.remove(filename)
             
@@ -88,20 +114,6 @@ def get_video_id(url):
     
     return None
 
-def get_playlist_videos(playlist_url):
-    """Extract all video URLs from a playlist"""
-    try:
-        playlist = Playlist(playlist_url)
-        video_urls = []
-        
-        for video_url in playlist.video_urls:
-            video_urls.append(video_url)
-        
-        return video_urls
-    except Exception as e:
-        st.error(f"Error extracting playlist: {e}")
-        return []
-
 def extract_unique_frames(video_file, output_folder, n=3, ssim_threshold=0.8):
     """Extract unique frames from video using SSIM comparison"""
     cap = cv2.VideoCapture(video_file)
@@ -120,10 +132,17 @@ def extract_unique_frames(video_file, output_folder, n=3, ssim_threshold=0.8):
     last_saved_frame_number = -1
     timestamps = []
     
+    progress_bar = st.progress(0)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
+        
+        # Update progress
+        if total_frames > 0:
+            progress_bar.progress(min(frame_number / total_frames, 1.0))
         
         if frame_number % n == 0:
             gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -163,6 +182,7 @@ def extract_unique_frames(video_file, output_folder, n=3, ssim_threshold=0.8):
         cv2.imwrite(frame_path, saved_frame)
         timestamps.append((frame_number, timestamp_seconds))
     
+    progress_bar.progress(1.0)
     cap.release()
     return timestamps
 
@@ -178,7 +198,11 @@ def convert_frames_to_pdf(input_folder, output_file, timestamps):
     pdf = FPDF("L")
     pdf.set_auto_page_break(0)
     
-    for frame_file, (frame_number, timestamp_seconds) in zip(frame_files, timestamps):
+    progress_bar = st.progress(0)
+    
+    for idx, (frame_file, (frame_number, timestamp_seconds)) in enumerate(zip(frame_files, timestamps)):
+        progress_bar.progress((idx + 1) / len(frame_files))
+        
         frame_path = os.path.join(input_folder, frame_file)
         
         if not os.path.exists(frame_path):
@@ -216,21 +240,6 @@ def convert_frames_to_pdf(input_folder, output_file, timestamps):
         st.error(f"Error creating PDF: {e}")
         return False
 
-def get_video_title(url):
-    """Get video title from YouTube URL"""
-    try:
-        yt = YouTube(url)
-        title = yt.title
-        # Sanitize filename
-        title = title.replace('/', '-').replace('\\', '-').replace(':', '-')
-        title = title.replace('*', '-').replace('?', '-').replace('<', '-')
-        title = title.replace('>', '-').replace('|', '-').replace('"', '-')
-        title = title.strip('.')
-        return title[:100]  # Limit length
-    except Exception as e:
-        st.warning(f"Could not get video title: {e}")
-        return "video"
-
 def cleanup_temp_files():
     """Clean up any leftover temporary video files"""
     try:
@@ -250,25 +259,27 @@ def process_single_video(url):
     # Clean up any old temp files first
     cleanup_temp_files()
     
-    video_file = download_video(url)
+    video_file = download_video_via_api(url)
     if not video_file or not os.path.exists(video_file):
-        st.error("Failed to download video. Please check the URL and try again.")
-        st.info("💡 Tip: Make sure the video is publicly available and not age-restricted.")
+        st.error("❌ Failed to download video.")
+        st.info("💡 **Alternative options:**")
+        st.markdown("1. Try a different video")
+        st.markdown("2. Download the video manually and use a local tool")
+        st.markdown("3. Use a browser extension for frame extraction")
         return None
     
     try:
-        video_title = get_video_title(url)
-        output_pdf_name = f"{video_title}.pdf"
+        output_pdf_name = f"youtube_frames_{uuid.uuid4().hex[:8]}.pdf"
         
         with tempfile.TemporaryDirectory() as temp_folder:
-            st.info("Extracting unique frames...")
+            st.info("📸 Extracting unique frames...")
             timestamps = extract_unique_frames(video_file, temp_folder)
             
             if not timestamps:
                 st.warning("No unique frames extracted from video")
                 return None
             
-            st.info(f"Extracted {len(timestamps)} unique frames. Creating PDF...")
+            st.info(f"📄 Creating PDF with {len(timestamps)} frames...")
             success = convert_frames_to_pdf(temp_folder, output_pdf_name, timestamps)
             
             if not success:
@@ -298,18 +309,21 @@ def main():
     # Clean up old files on start
     cleanup_temp_files()
     
+    # Warning about current limitations
+    st.warning("⚠️ **Note:** Due to YouTube's recent restrictions, some videos may fail to download. We're using a third-party API service which may have limitations.")
+    
     # Input URL
-    url = st.text_input("Enter the YouTube video or playlist URL:", placeholder="https://www.youtube.com/watch?v=...")
+    url = st.text_input("Enter the YouTube video URL:", placeholder="https://www.youtube.com/watch?v=...")
     
     if not url:
         st.info("👆 Please enter a YouTube URL to begin")
         st.markdown("### How to use:")
-        st.markdown("1. Paste a YouTube video URL")
-        st.markdown("2. Click 'Process Video/Playlist'")
+        st.markdown("1. Paste a YouTube video URL (single video only)")
+        st.markdown("2. Click 'Process Video'")
         st.markdown("3. Download the generated PDF with timestamped frames")
         return
     
-    if st.button("Process Video/Playlist", type="primary"):
+    if st.button("Process Video", type="primary"):
         video_id = get_video_id(url)
         
         if video_id:  # Single video
@@ -317,6 +331,7 @@ def main():
             
             if output_pdf and os.path.exists(output_pdf):
                 st.success("✅ PDF created successfully!")
+                st.balloons()
                 with open(output_pdf, "rb") as f:
                     st.download_button(
                         label="📥 Download PDF",
@@ -329,37 +344,8 @@ def main():
                     os.remove(output_pdf)
                 except:
                     pass
-            
-        else:  # Playlist
-            st.info("Detected playlist. Extracting videos...")
-            video_urls = get_playlist_videos(url)
-            
-            if not video_urls:
-                st.error("No videos found in playlist or invalid playlist URL")
-                return
-            
-            st.info(f"Found {len(video_urls)} videos in playlist")
-            
-            for idx, video_url in enumerate(video_urls, 1):
-                st.write(f"Processing video {idx}/{len(video_urls)}")
-                output_pdf = process_single_video(video_url)
-                
-                if output_pdf and os.path.exists(output_pdf):
-                    with open(output_pdf, "rb") as f:
-                        st.download_button(
-                            label=f"📥 Download {os.path.basename(output_pdf)}",
-                            data=f,
-                            file_name=output_pdf,
-                            mime="application/pdf",
-                            key=f"download_{idx}"
-                        )
-                    # Clean up
-                    try:
-                        os.remove(output_pdf)
-                    except:
-                        pass
-            
-            st.success("✅ All videos processed!")
+        else:
+            st.error("Invalid YouTube URL or playlists are not supported at this time.")
 
 if __name__ == "__main__":
     main()
