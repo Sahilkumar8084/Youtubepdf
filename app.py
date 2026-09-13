@@ -858,8 +858,10 @@ def main():
                         )
                     try:
                         os.remove(output_pdf)
-                    except:
-                        pass
+                    except Exception as e:
+                        st.write("output_pdf Removing failed")
+                        st.write(f"Error: {e}")
+                        
 
             st.success("All videos processed! ✅")
 
