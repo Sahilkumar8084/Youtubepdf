@@ -7,11 +7,23 @@
 
 > **Transform YouTube videos into timestamped PDFs of unique frames** — perfect for lecture notes, movie summaries, and visual documentation.
 
+## 📸 Screenshots
+
+### App Interface
+![App Screenshot](docs/Actual%20App%20.png)
+
+### Sample Output Frame
+![Output Frame](docs/output%20frame%20.png)
+
+
 ---
 
 ## 📖 Table of Contents
 
 - [🎬 Glance Video - YouTube Frame Extractor](#-glance-video---youtube-frame-extractor)
+  - [� Screenshots](#-screenshots)
+    - [App Interface](#app-interface)
+    - [Sample Output Frame](#sample-output-frame)
   - [📖 Table of Contents](#-table-of-contents)
   - [🎯 What is Glance Video?](#-what-is-glance-video)
   - [💡 The Problem It Solves](#-the-problem-it-solves)
