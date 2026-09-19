@@ -1,5 +1,6 @@
 import sys
 import time
+import requests
 from PIL import ImageFile
 sys.modules['ImageFile'] = ImageFile
 import cv2
@@ -361,6 +362,33 @@ def get_video_title(url):
         st.warning(f"Could not get video title: {e}")
         return "video"
 
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def get_video_info(url):
+    """Fast preview info (title + thumbnail + channel) via YouTube's public
+    oEmbed endpoint - a single small JSON request, no format/signature
+    resolution like a full yt-dlp extraction needs. Cached per URL so
+    re-running the Streamlit script (e.g. moving a slider) never refetches.
+    Note: oEmbed doesn't provide duration, so that field is always None."""
+    try:
+        resp = requests.get(
+            "https://www.youtube.com/oembed",
+            params={"url": url, "format": "json"},
+            timeout=4,
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        return {
+            'title': data.get('title', 'Unknown title'),
+            'thumbnail': data.get('thumbnail_url'),
+            'uploader': data.get('author_name'),
+            'duration': None,
+        }
+    except Exception:
+        return None
+
+
 def cleanup_temp_files(pattern="video_*.mp4"):
     """Clean up any leftover temporary video files"""
     try:
@@ -417,5 +445,3 @@ def process_single_video(url, quality='fast', frame_skip=3):
             except:
                 pass
         return None
-    
- 

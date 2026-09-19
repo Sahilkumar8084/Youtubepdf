@@ -2,7 +2,7 @@ import sys
 import time
 from PIL import ImageFile
 
-from helper import cleanup_temp_files, get_playlist_videos, get_video_id, process_single_video
+from helper import cleanup_temp_files, get_playlist_videos, get_video_id, get_video_info, process_single_video
 sys.modules['ImageFile'] = ImageFile
 import cv2
 import os
@@ -24,6 +24,28 @@ def main():
     cleanup_temp_files()
 
     url = st.text_input("Enter the YouTube video or playlist URL:")
+
+    if url:
+        video_id_preview = get_video_id(url)
+        if video_id_preview:
+            with st.spinner("Fetching video info..."):
+                info = get_video_info(url)
+            if info:
+                preview_col1, preview_col2 = st.columns([1, 2])
+                with preview_col1:
+                    if info.get('thumbnail'):
+                        st.image(info['thumbnail'], use_container_width=True)
+                with preview_col2:
+                    st.markdown(f"**{info['title']}**")
+                    if info.get('uploader'):
+                        st.caption(f"by {info['uploader']}")
+                    if info.get('duration'):
+                        mins, secs = divmod(int(info['duration']), 60)
+                        st.caption(f"Duration: {mins}:{secs:02d}")
+            else:
+                st.warning("Couldn't fetch a preview for this URL - double-check it. You can still try processing.")
+        else:
+            st.info("Playlist URL detected - previews aren't shown for playlists.")
 
     col1, col2 = st.columns(2)
     with col1:
