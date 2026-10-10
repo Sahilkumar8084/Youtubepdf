@@ -1,6 +1,6 @@
 # 🎬 Glance Video - YouTube Frame Extractor
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python)
+![Python](https://img.shields.io/badge/Python-3.12-blue?style=for-the-badge&logo=python)
 ![Streamlit](https://img.shields.io/badge/Streamlit-1.54-FF4B4B?style=for-the-badge&logo=streamlit)
 ![OpenCV](https://img.shields.io/badge/OpenCV-4.13-5C3EE8?style=for-the-badge&logo=opencv)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
@@ -316,7 +316,7 @@ Before you begin, ensure you have the following installed:
 
 | Requirement | Version | Check Command |
 |-------------|---------|---------------|
-| **Python** | 3.10 or higher | `python --version` |
+| **Python** | 3.12 (tested) | `python --version` |
 | **pip** | Latest | `pip --version` |
 | **Git** | Any | `git --version` |
 | **FFmpeg** | Latest | `ffmpeg -version` |
@@ -341,6 +341,8 @@ cd glance_video
 python -m venv venv
 venv\Scripts\activate
 ```
+
+> Use Python 3.12 for the venv. On Windows with multiple Pythons installed: `py -3.12 -m venv venv`.
 
 **macOS/Linux:**
 ```bash
@@ -740,6 +742,6 @@ copies or substantial portions of the Software.
 
 ---
 
-Made with ❤️ by the Glance Video Team
+Made with ❤️ by the Sahil Kumar
 
 </div>
