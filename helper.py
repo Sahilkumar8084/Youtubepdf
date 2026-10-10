@@ -92,6 +92,7 @@ def download_video(url, max_retries=3, quality='fast'):
             'continuedl': False,
             'nocheckcertificate': True,
             'geo_bypass': True,
+            'cookiefile': 'cookies.txt',
             'extractor_args': {
                 'youtube': {
                     'player_client': clients,
